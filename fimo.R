@@ -4,7 +4,93 @@ library("Biostrings")
 library("dplyr")
 library(devtools)
 source_gist(4676064)
+
+if(interactive())
+{
+  max.mismatch <- 2
+  min.mismatch <- 1
+  threshold <- 3
+  upstream.distance <- 100
+}
+else
+{
+ arguments <- as.integer(commandArgs(trailingOnly = T))
+ max.mismatch <- arguments[1]
+ min.mismatch <- arguments[2]
+ threshold <- arguments[3]
+ upstream.distance <- arguments[4]
+}
+
+commandArgs <- function() threshold
 source("rna-seq-accession.R")
+
+
+# max.mismatch <- 2
+# min.mismatch <- 2
+# threshold <- 3
+# 
+##IMPORTANTE: DA ERROR SI FIMO CONTIENE INSTANCIAS DE TSS EN PLASMIDOS Y NO EN EL CROMOSOMA PRINCIPAL
+##El error consiste en que quiere añadr columnas al data.frame relevant.tss.expression con mas
+## filas que las que tiene la propia df
+comparator <- function(DNA.pattern, DNA.subject, mismatch = 1, hits.df, expression, threshold = 3)
+{
+  ## Genera una data.frame en la que cada fila representa un TSS y hay 4 columnas:
+  ## source, coordenada, gen y tipo de tss
+  hits.df.tss <- hits.df[["sequence.name"]] %>% as.character() %>% strsplit(split = "_") %>% as.data.frame()
+  colnames(hits.df.tss) <- c("source","coordinate","gene","TSS.type")
+  
+  ## Genera una data.frame analoga con los TSS que tienen un palindromo con el numero de mismatches predefinido
+  ## en su entorno
+  mismatches <- unlist(vmatchPattern(pattern  = DNA.pattern,
+                                       subject = DNA.subject,
+                                       max.mismatch = mismatch, min.mismatch = mismatch)) %>% 
+  names() %>% 
+  strsplit(split = "_") %>% 
+  as.data.frame.list()
+  colnames(mismatches) <- c("source","coordinate","gene","TSS.type")
+  
+  ##Obten el vector de caracteres relevant.tss, que no es mas que:
+  #para los tss que encuentre que tienen un palindromo con los mismatches que sean, recompon su nombre (source_coord_gen_tipoTSS)
+  relevant.tss <- with(mismatches, paste0(source, "_", coordinate, "_", gene, "_", TSS.type))
+  
+  #determina qué posiciones de hits.df hay que extraer: aquellas que correspondan a la primera ocurrencia
+  #de un relevant.tss.
+  relevant.tss.index <- hits.df$sequence.name %in% relevant.tss & ! duplicated(hits.df$sequence.name)
+  #haz un subset de fimo que contenga solo esos tss
+  hits.df.subset <- subset(hits.df, relevant.tss.index)
+  
+  #genera el subset equivalente (las mismas filas) de la data.frame de los tss y extrae las coordenadas
+  hits.df.tss.subset <- subset(hits.df.tss, relevant.tss.index)
+  relevant.tss.coordinates <- hits.df.tss.subset$coordinate
+  
+  relevant.tss.start <- hits.df.subset$start
+  relevant.tss.stop  <- hits.df.subset$stop
+  relevant.tss.gene <- hits.df.tss.subset$gene %>% as.character()
+  
+  #extrae las coordenadas de todos los tss en expression.df y quedate con las posiciones de los que estan
+  #en relevant.tss.coordinates para saber qué posiciones de expression.df nos interesan (ok.positions)
+  all.coordinates <- expression.df$coordinate
+  relevant.tss.positions <- which(all.coordinates %in% relevant.tss.coordinates)
+  
+
+  relevant.tss.expression <- expression.df[relevant.tss.positions,]
+  
+  vector1 <- relevant.tss.expression$coordinate %>% as.character() %>% as.numeric()
+  vector2 <- hits.df.tss.subset$coordinate %>% as.character() %>% as.numeric()
+  mynumbers <- match(vector1, vector2)
+  
+  
+  relevant.tss.expression$start <- relevant.tss.start[mynumbers]
+  relevant.tss.expression$stop  <- relevant.tss.stop[mynumbers]
+  relevant.tss.expression$sequence <- hits.df[relevant.tss.index,]$matched.sequence[mynumbers]
+  relevant.tss.expression$TSS.type <- hits.df.tss [relevant.tss.index,]$TSS.type[mynumbers]
+  relevant.tss.expression$gene <- relevant.tss.gene[mynumbers]
+  relevant.tss.expression$n.mismatch <- mismatch
+  
+  return(relevant.tss.expression)
+}
+
+
 
 
 #Define the palindromic sequence
@@ -16,6 +102,10 @@ DNAS.palindromo <-  DNAString(palindromo)  # pasamos la secuencia del palindromo
 
 #Incorporate FIMO output as data.frame
 fimo <- read.table("fimo.txt", header = T, sep = "\t", quote = "")
+hits.df <- fimo
+DNA.pattern <- DNAS.palindromo
+DNA.subject <- DNAS.match.sequence
+
 #Parse tss metadata structured by _
 fimo.tss <- fimo[["sequence.name"]] %>% as.character() %>% strsplit(split = "_") %>% as.data.frame()
 colnames(fimo.tss) <- c("source","coordinate","gene","TSS.type")
@@ -28,104 +118,55 @@ names(match.sequence) <- as.character(fimo[["sequence.name"]])
 #Transform it into Biostrings data
 DNAS.match.sequence <- DNAStringSet(match.sequence)
 
+## Initialize the data.frame that will store extracted data
+data <- data.frame()
 
-oneMatch <- unlist(vmatchPattern(pattern = DNAS.palindromo,
-                                 subject = DNAS.match.sequence,
-                                 max.mismatch = 1, min.mismatch = 1)) %>% 
-   names() %>% 
-   strsplit(split = "_") %>% 
-   as.data.frame.list()
+## For every possible mismatch, extract data and add it to that of all other mismatches
+for(mismatch in min.mismatch:max.mismatch)
+{
+  print(mismatch)
+  current.mismatch <- comparator(DNAS.palindromo, DNAS.match.sequence, mismatch, hits.df = fimo, expression = expression.df[,-(3:4)], threshold)
+  data <- rbind(data, current.mismatch)
+}
 
-colnames(oneMatch) <- c("source","coordinate","gene","TSS.type")
+## Make the number of mismatches a factor (n.mismatch) so that ggplot can handle it
+data$n.mismatch <- factor(data$n.mismatch, levels = min.mismatch:max.mismatch)
 
-relevant.tss <- with(oneMatch, paste0(source, "_", coordinate, "_", gene, "_", TSS.type))
+data <- data[with(data, order(n.mismatch, significant, start)), ]
 
-oneMatch <- subset(fimo, fimo$sequence.name %in% relevant.tss)
-oneMatch$start - upstream.distance
-
-ggplot(data = oneMatch, aes(x = start - upstream.distance)) + geom_histogram(binwidth = 5)
-ggplot(data = oneMatch, aes(x = start - upstream.distance)) + geom_density()
-
-
-fimo.tss[["coordinate"]] %>% as.character() %>% as.numeric()
-
-oneMatch[,1] %>% as.character() %>% as.numeric() %>% unique()
-interesting.genes <- oneMatch[,2] %>% as.character() %>% unique()
+data$Distance.to.TSS <- data$start - upstream.distance
+data$symbol <- ifelse(data$Distance.to.TSS > 0, "+", "-")
+data$Distance.to.TSS <- abs(data$Distance.to.TSS)
 
 
 
+write.table(data, file = "fimo_data.txt", row.names = F)
 
 ##Porcentaje de TSS con un palindromo de 1 mismatch en torno a el
-100*nrow(oneMatch)/40540
+100*nrow(data)/nrow(expression.df)
+
+##Visualiza la distribucion de los tipos de TSS en el fondo y en los tss de interes
+plot(table(fimo.tss[["TSS.type"]]))
+plot(table(data[["TSS.type"]]))
 
 
-plot(table(fimo.tss[,3]))
-plot(table(oneMatch[,3]))
+## Graphics production
+ggplot(data = data, aes(x = log10(WT0), y = log10(WT8), col = significant)) + geom_point()
+ggsave("plot1_1.pdf")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-positions <- expression.df[["TSS"]] %>% as.character() %in% as.character(oneMatch[,2])
-one.mismatch.subset <- subset(expression.df, subset = positions)
-
-comparison.df <- dplyr::filter(one.mismatch.subset, genotype == "WT") %>% dplyr::select(-genotype)
-WT0 <- comparison.df[comparison.df[["time"]] == 0, "score"]
-WT8 <- comparison.df[comparison.df[["time"]] == 8, "score"]
-comparison.df <- data.frame(seqs.ids, WT0, WT8) 
-comparison.df <- na.omit(comparison.df)
-
-number.genes <- nrow(comparison.df)/2
-
-ratiowt8    <- numeric(length=number.genes)
-ratiohetr0  <- numeric(length=number.genes)
-ratiohetr8  <- numeric(length=number.genes)
-
-index <- 1
-for (i in 4*(1:number.genes)-3)
-{
-  print(index)
-  current.ratiowt8   <- expression.df[i+1,4] / expression.df[i,4]
-  current.ratiohetr0 <- expression.df[i+2,4] / expression.df[i,4]
-  current.ratiohetr8 <- expression.df[i+3,4] / expression.df[i,4]
-  ratiowt8[index] <- current.ratiowt8
-  ratiohetr0[index] <- current.ratiohetr0
-  ratiohetr8[index] <- current.ratiohetr8
-  index <- index +1
-}
-#unos segundos y listo
-
-ratio.matrix <- matrix(c(ratiowt8, ratiohetr0, ratiohetr8), nrow = 3, byrow = T)
-colnames(ratio.matrix) <- ids
-
-ratio.df <- data.frame(rep(ids, each = 3), as.numeric(ratio.matrix))
-
-ggplot(data = comparison.df) + geom_point(aes(x = log10(WT0), y = log10(WT8)))
-
-
-WT8.fold.change <- comparison.df[["WT8"]] / comparison.df[["WT0"]]
-comparison.df[["fold_change"]] <- WT8.fold.change
-comparison.df[["significant"]] <- ifelse(WT8.fold.change > 3 | WT8.fold.change < 1/3, "yes", "no" )
-
-p <- ggplot(data = comparison.df)
-p <- p + geom_point(aes(x = log10(WT0), y = log10(WT8), colour = significant))
-#p <- p + labs(x = NULL, y = NULL, title = "RNA-seq de la transición a ausencia de nitrógeno 8h")
-p <- p + labs(y = expression(log[1*0]*"(8h)"), x = expression(log[1*0]*"(0h)"))
-p <- p + geom_text(aes(x = log10(2198), y = log10(21648) + 0.15, label = "all1873"))
-p <- p + guides(colour = FALSE)
-p <- p + scale_color_manual(values = c("#000099", "#E69F00"))
-p <- p + theme_set(theme_bw(base_size = 15))
-p <- p + theme(plot.title = element_text(hjust = 0)) 
-p
-
-
+ggplot(data = data, aes(x = log10(WT0), y = log10(WT8), col = significant, shape = n.mismatch)) + 
+  geom_point() +
+  scale_shape_manual(values = c(17, 19))
+ggsave("plot1_2.pdf")
+##Perfil de la distribucion del comienzo de los palindromos en el entorno de los TSS de interes
+##Cuanto más alta sea la señal, es que la frecuencia con la que el TSS se posiciona ahí es mayor
+ggplot(data = data, aes(x = start - upstream.distance)) + geom_histogram(binwidth = 5)
+ggsave("plot2.pdf")
+ggplot(data = data, aes(x = start - upstream.distance, fill = significant)) + geom_histogram()
+ggsave("plot3.pdf")
+ggplot(data = data, aes(x = start - upstream.distance)) + geom_density(size = 1.5)
+ggsave("plot4.pdf")
+ggplot(data = data, aes(x = start - upstream.distance, col = significant)) + geom_density(size = 1.5)
+ggsave("plot5.pdf")
+ggplot(data = data, aes(x = significant, fill = significant)) + geom_bar()
+ggsave("plot6.pdf")
