@@ -3,6 +3,7 @@ setwd("~/MEGA/CuartoCurso/TFG/Bioinformatica/")
 library("Biostrings")
 library("dplyr")
 library(devtools)
+library("seqinr")
 source_gist(4676064)
 
 if(interactive())
@@ -25,10 +26,7 @@ commandArgs <- function() threshold
 source("rna-seq-accession.R")
 
 
-# max.mismatch <- 2
-# min.mismatch <- 2
-# threshold <- 3
-# 
+ 
 ##IMPORTANTE: DA ERROR SI FIMO CONTIENE INSTANCIAS DE TSS EN PLASMIDOS Y NO EN EL CROMOSOMA PRINCIPAL
 ##El error consiste en que quiere añadr columnas al data.frame relevant.tss.expression con mas
 ## filas que las que tiene la propia df
@@ -104,7 +102,6 @@ DNAS.palindromo <-  DNAString(palindromo)  # pasamos la secuencia del palindromo
 fimo <- read.table("fimo.txt", header = T, sep = "\t", quote = "")
 hits.df <- fimo
 DNA.pattern <- DNAS.palindromo
-DNA.subject <- DNAS.match.sequence
 
 #Parse tss metadata structured by _
 fimo.tss <- fimo[["sequence.name"]] %>% as.character() %>% strsplit(split = "_") %>% as.data.frame()
@@ -118,6 +115,7 @@ names(match.sequence) <- as.character(fimo[["sequence.name"]])
 #Transform it into Biostrings data
 DNAS.match.sequence <- DNAStringSet(match.sequence)
 
+DNA.subject <- DNAS.match.sequence
 ## Initialize the data.frame that will store extracted data
 data <- data.frame()
 
@@ -129,12 +127,35 @@ for(mismatch in min.mismatch:max.mismatch)
   data <- rbind(data, current.mismatch)
 }
 
+##Correct the sequences found in the complementary strand
+sequences <- data$sequence %>% as.character()
+for (row in 1:nrow(data))
+{
+  current.strand <- data$strand.character[row]
+  if(current.strand == "-")
+  {
+    print(row)
+    current.sequence <- sequences[row] %>% as.character() %>% strsplit(split = "") %>% unlist()
+    current.sequence <- current.sequence %>% seqinr::comp() %>% rev() %>% toupper()
+    current.sequence <- paste(current.sequence, collapse = "") 
+    print(current.sequence)
+    sequences[row] <- current.sequence
+  }
+}
+
+data$sequence <- sequences
+
+
 ## Make the number of mismatches a factor (n.mismatch) so that ggplot can handle it
 data$n.mismatch <- factor(data$n.mismatch, levels = min.mismatch:max.mismatch)
 
 data <- data[with(data, order(n.mismatch, significant, start)), ]
 
 data$Distance.to.TSS <- data$start - upstream.distance
+
+Alicia <- data %>% dplyr::select(coordinate, strand.character, gene, TSS.type, Distance.to.TSS, fold.change, significant, sequence, n.mismatch)
+
+
 data$symbol <- ifelse(data$Distance.to.TSS > 0, "+", "-")
 data$Distance.to.TSS <- abs(data$Distance.to.TSS)
 
