@@ -87,11 +87,11 @@ expression.df <- cbind(expression.df, strand.character)
 
 expression.df$WT0   <- expression.df$WT0 %>% as.character() %>% as.numeric()
 expression.df$WT8   <- expression.df$WT8 %>% as.character() %>% as.numeric()
-expression.df$ratio <- expression.df$WT8 / expression.df$WT0
+expression.df$fold.change <- expression.df$WT8 / expression.df$WT0
 
 expression.df$significant <- rep("no", times = nrow(expression.df))
-expression.df$significant[expression.df$ratio > threshold]   <- "increase"
-expression.df$significant[expression.df$ratio < 1/threshold] <- "decrease"
+expression.df$significant[expression.df$fold.change > threshold]   <- "increase"
+expression.df$significant[expression.df$fold.change < 1/threshold] <- "decrease"
 
 
 rm(strand, strand.character, ids, i, current.tss, current.wt0, current.wt8, current.hetR0, current.hetR8, index, data, current.id, current.coordinate)
