@@ -6,6 +6,13 @@ library(devtools)
 library("seqinr")
 source_gist(4676064)
 
+ arguments <- as.integer(commandArgs(trailingOnly = T))
+ max.mismatch <- arguments[1]
+ min.mismatch <- arguments[2]
+ threshold <- arguments[3]
+ upstream.distance <- arguments[4]
+
+
 if(interactive())
 {
   max.mismatch <- 2
@@ -13,14 +20,7 @@ if(interactive())
   threshold <- 3
   upstream.distance <- 100
 }
-else
-{
- arguments <- as.integer(commandArgs(trailingOnly = T))
- max.mismatch <- arguments[1]
- min.mismatch <- arguments[2]
- threshold <- arguments[3]
- upstream.distance <- arguments[4]
-}
+
 
 commandArgs <- function() threshold
 source("rna-seq-accession.R")
@@ -35,7 +35,7 @@ comparator <- function(DNA.pattern, DNA.subject, mismatch = 1, hits.df, expressi
   ## Genera una data.frame en la que cada fila representa un TSS y hay 4 columnas:
   ## source, coordenada, gen y tipo de tss
   hits.df.tss <- hits.df[["sequence.name"]] %>% as.character() %>% strsplit(split = "_") %>% as.data.frame()
-  colnames(hits.df.tss) <- c("source","coordinate","gene","TSS.type")
+  colnames(hits.df.tss) <- c("Source","TSS","Annotation","TSS.class")
   
   ## Genera una data.frame analoga con los TSS que tienen un palindromo con el numero de mismatches predefinido
   ## en su entorno
@@ -45,11 +45,11 @@ comparator <- function(DNA.pattern, DNA.subject, mismatch = 1, hits.df, expressi
   names() %>% 
   strsplit(split = "_") %>% 
   as.data.frame.list()
-  colnames(mismatches) <- c("source","coordinate","gene","TSS.type")
+  colnames(mismatches) <- c("Source","TSS","Annotation","TSS.class")
   
   ##Obten el vector de caracteres relevant.tss, que no es mas que:
   #para los tss que encuentre que tienen un palindromo con los mismatches que sean, recompon su nombre (source_coord_gen_tipoTSS)
-  relevant.tss <- with(mismatches, paste0(source, "_", coordinate, "_", gene, "_", TSS.type))
+  relevant.tss <- with(mismatches, paste0(Source, "_", TSS, "_", Annotation, "_", TSS.class))
   
   #determina qué posiciones de hits.df hay que extraer: aquellas que correspondan a la primera ocurrencia
   #de un relevant.tss.
@@ -59,30 +59,30 @@ comparator <- function(DNA.pattern, DNA.subject, mismatch = 1, hits.df, expressi
   
   #genera el subset equivalente (las mismas filas) de la data.frame de los tss y extrae las coordenadas
   hits.df.tss.subset <- subset(hits.df.tss, relevant.tss.index)
-  relevant.tss.coordinates <- hits.df.tss.subset$coordinate
+  relevant.tss.coordinates <- hits.df.tss.subset$TSS
   
   relevant.tss.start <- hits.df.subset$start
   relevant.tss.stop  <- hits.df.subset$stop
-  relevant.tss.gene <- hits.df.tss.subset$gene %>% as.character()
+  relevant.tss.gene <- hits.df.tss.subset$Annotation %>% as.character()
   
   #extrae las coordenadas de todos los tss en expression.df y quedate con las posiciones de los que estan
   #en relevant.tss.coordinates para saber qué posiciones de expression.df nos interesan (ok.positions)
-  all.coordinates <- expression.df$coordinate
+  all.coordinates <- expression.df$TSS
   relevant.tss.positions <- which(all.coordinates %in% relevant.tss.coordinates)
   
 
   relevant.tss.expression <- expression.df[relevant.tss.positions,]
   
-  vector1 <- relevant.tss.expression$coordinate %>% as.character() %>% as.numeric()
-  vector2 <- hits.df.tss.subset$coordinate %>% as.character() %>% as.numeric()
+  vector1 <- relevant.tss.expression$TSS %>% as.character() %>% as.numeric()
+  vector2 <- hits.df.tss.subset$TSS %>% as.character() %>% as.numeric()
   mynumbers <- match(vector1, vector2)
   
   
   relevant.tss.expression$start <- relevant.tss.start[mynumbers]
   relevant.tss.expression$stop  <- relevant.tss.stop[mynumbers]
   relevant.tss.expression$sequence <- hits.df[relevant.tss.index,]$matched.sequence[mynumbers]
-  relevant.tss.expression$TSS.type <- hits.df.tss [relevant.tss.index,]$TSS.type[mynumbers]
-  relevant.tss.expression$gene <- relevant.tss.gene[mynumbers]
+  relevant.tss.expression$TSS.class <- hits.df.tss [relevant.tss.index,]$TSS.class[mynumbers]
+  relevant.tss.expression$Annotation <- relevant.tss.gene[mynumbers]
   relevant.tss.expression$n.mismatch <- mismatch
   
   return(relevant.tss.expression)
@@ -105,7 +105,7 @@ DNA.pattern <- DNAS.palindromo
 
 #Parse tss metadata structured by _
 fimo.tss <- fimo[["sequence.name"]] %>% as.character() %>% strsplit(split = "_") %>% as.data.frame()
-colnames(fimo.tss) <- c("source","coordinate","gene","TSS.type")
+colnames(fimo.tss) <- c("Source","TSS","Annotation","TSS.class")
 
 #Make match.sequence a character vector where every element i is the ith sequence detected
 match.sequence <-dplyr::select(fimo, matched.sequence)[,1] %>% as.character()
@@ -127,12 +127,14 @@ for(mismatch in min.mismatch:max.mismatch)
   data <- rbind(data, current.mismatch)
 }
 
+data$Strand
+
 ##Correct the sequences found in the complementary strand
 sequences <- data$sequence %>% as.character()
 for (row in 1:nrow(data))
 {
-  current.strand <- data$strand.character[row]
-  if(current.strand == "-")
+  current.strand <- data$Strand[row]
+  if(current.strand == "rev")
   {
     print(row)
     current.sequence <- sequences[row] %>% as.character() %>% strsplit(split = "") %>% unlist()
@@ -153,8 +155,9 @@ data <- data[with(data, order(n.mismatch, significant, start)), ]
 
 data$Distance.to.TSS <- data$start - upstream.distance
 
-Alicia <- data %>% dplyr::select(coordinate, strand.character, gene, TSS.type, Distance.to.TSS, fold.change, significant, sequence, n.mismatch)
+Alicia <- data %>% dplyr::select(TSS, Strand, Annotation, TSS.class, Distance.to.TSS, fold.change.WT, significant, sequence, n.mismatch)
 
+write.table(Alicia, file = "palindromos_hasta_2_mismatches.txt", row.names = F)
 
 data$symbol <- ifelse(data$Distance.to.TSS > 0, "+", "-")
 data$Distance.to.TSS <- abs(data$Distance.to.TSS)
@@ -167,8 +170,8 @@ write.table(data, file = "fimo_data.txt", row.names = F)
 100*nrow(data)/nrow(expression.df)
 
 ##Visualiza la distribucion de los tipos de TSS en el fondo y en los tss de interes
-plot(table(fimo.tss[["TSS.type"]]))
-plot(table(data[["TSS.type"]]))
+plot(table(fimo.tss[["TSS.class"]]))
+plot(table(data[["TSS.class"]]))
 
 
 ## Graphics production
@@ -191,3 +194,4 @@ ggplot(data = data, aes(x = start - upstream.distance, col = significant)) + geo
 ggsave("plot5.pdf")
 ggplot(data = data, aes(x = significant, fill = significant)) + geom_bar()
 ggsave("plot6.pdf")
+
