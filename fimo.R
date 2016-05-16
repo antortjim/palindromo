@@ -1,6 +1,7 @@
 #Load packages and set working space
 setwd("~/MEGA/CuartoCurso/TFG/Bioinformatica/")
 library("Biostrings")
+library("ggplot2")
 library("dplyr")
 library(devtools)
 library("seqinr")
@@ -127,8 +128,6 @@ for(mismatch in min.mismatch:max.mismatch)
   data <- rbind(data, current.mismatch)
 }
 
-data$Strand
-
 ##Correct the sequences found in the complementary strand
 sequences <- data$sequence %>% as.character()
 for (row in 1:nrow(data))
@@ -162,9 +161,15 @@ write.table(Alicia, file = "palindromos_hasta_2_mismatches.txt", row.names = F)
 data$symbol <- ifelse(data$Distance.to.TSS > 0, "+", "-")
 data$Distance.to.TSS <- abs(data$Distance.to.TSS)
 
+data <- rbind(data.frame(filter(expression.df, Annotation == "all1873"), start = 101, stop = 111,
+           sequence = palindromo, n.mismatch = 0, Distance.to.TSS = 1, symbol = "+"), data)
 
 
-write.table(data, file = "fimo_data.txt", row.names = F)
+write.table(dplyr::select(data, TSS, Strand, Annotation, TSS.class, symbol, Distance.to.TSS, fold.change.WT, sequence), file = "fimo_data.txt", row.names = F)
+
+sequences <- data$sequence %>% as.character() %>% as.list()
+seqs.id <- paste(data$TSS, data$Annotation, data$TSS.class, sep ="_")
+write.fasta(file = "sequences.fa", sequences = sequences, names = seqs.id)  
 
 ##Porcentaje de TSS con un palindromo de 1 mismatch en torno a el
 100*nrow(data)/nrow(expression.df)
@@ -190,8 +195,16 @@ ggplot(data = data, aes(x = start - upstream.distance, fill = significant)) + ge
 ggsave("plot3.pdf")
 ggplot(data = data, aes(x = start - upstream.distance)) + geom_density(size = 1.5)
 ggsave("plot4.pdf")
-ggplot(data = data, aes(x = start - upstream.distance, col = significant)) + geom_density(size = 1.5)
-ggsave("plot5.pdf")
+
+ggplot(data = data, aes(x = start - upstream.distance, col = significant)) + geom_density(size = 1.5) +
+  xlab("Intervalo (-100, +50) respecto a los TSS") + ylab("Densidad") + theme_bw() +
+  scale_color_manual(name = "Actividad transcripcional\nen el estrés por nitrógeno",
+                     labels = c("Disminuye","Aumenta","No significativo"),
+                     breaks = c("decrease","increase","no"),
+                     values = c("red","green","blue"))
+
+ggsave("../../Documento/TFG/Figures/plot5.pdf")
+
 ggplot(data = data, aes(x = significant, fill = significant)) + geom_bar()
 ggsave("plot6.pdf")
 
