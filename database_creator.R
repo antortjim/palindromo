@@ -87,3 +87,4 @@ for(i in 1:nrow(tss.df))
 # Exporta todo a un archivo fasta
 write.fasta(file.out = "Anabaena_150_promotor.fasta", sequences = seqs.list, names = seqs.id, nbchar = 50, as.string = T)
 
+print("Database was created and exploratory scatter plots completed. You may now submit it to FIMO")
