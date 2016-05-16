@@ -208,3 +208,19 @@ ggsave("../../Documento/TFG/Figures/plot5.pdf")
 ggplot(data = data, aes(x = significant, fill = significant)) + geom_bar()
 ggsave("plot6.pdf")
 
+
+## Significant genes
+significant.genes <- rep(1, times = length(data$Annotation))
+names(significant.genes) <- data$Annotation
+
+
+
+## Background
+background.genes <- rep(0, times = length(expression.df$Annotation))
+names(background.genes) <-  expression.df$Annotation
+
+
+## Enriquecimiento
+source("GSEA.R")
+GeneSetEnrichmentAnalysis()
+hist(as.numeric(cast(nGO[,1:2], . ~ GID)))
