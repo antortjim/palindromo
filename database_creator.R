@@ -14,6 +14,47 @@ source_gist(4676064)
 upstream.distance <- 100
 downstream.distance <- 49
 
+
+asCharacter <- function(my.characters)
+{
+ result <- my.characters %>% strsplit(split = ", ") %>% unlist()
+ return(result)
+}
+
+paste.features.by.underscore <- function(df, features, fasta.restriction = T)
+{
+  options(stringsAsFactors = FALSE)
+  features <- asCharacter(features)
+  mydf <- data.frame(mock = rep(0, nrow(df)), stringsAsFactors = F)
+  for(i in 1:length(features))
+  {
+    mydf <- cbind(mydf, df[[features[i]]])
+  }
+  mydf <- mydf[,-1]
+  mylist <- list()
+  
+  if(fasta.restriction)
+  {
+    for(i in 1:nrow(mydf))
+    {
+      new.string <- paste(mydf[i,], collapse = "_")
+      new.string <- gsub(" ", "-", new.string)
+      mylist[i] <- new.string
+    }
+  }
+  else
+  {  
+   for(i in 1:nrow(mydf))
+   {
+     new.string <- paste(mydf[i,], collapse = "_")
+     mylist[i] <- new.string
+   }
+  }
+    
+  result <- as.data.frame.list(mylist)
+  return(result)
+}
+
 ## Introduce las secuencias genomicas
 bsgenome <- PCC7120_Ensembl_v29
 genome <- getSeq(bsgenome)
@@ -23,10 +64,9 @@ genome <- lapply(genome, function(x) strsplit(as.character(x), split = ""))
 tss.df <- read.xlsx("sd01.xlsx", sheet = 1, startRow = 2, colNames = TRUE)
 
 ## Construye el identificador de todas las secuencias (seqs.id)
-seqs.id <- tss.df %>% dplyr::select(Source, TSS, Annotation, TSS.class)
-seqs.id <- with(seqs.id, paste0(Source, "_", TSS, "_", Annotation, "_", TSS.class))
+seqs.id <- paste.features.by.underscore(tss.df,  "Source, TSS, Annotation, TSS.class")
 
-
+#tss.df[1390,] %>% dplyr::select(Source, TSS, Annotation, TSS.class)
 
 ## Extrae las coordenadas dentro de la mega data.frame con todos los datos del PNAS
 ## para facilitar su acceso en cada iteracion del bucle for
@@ -43,6 +83,8 @@ tss.source[tss.source == "epsilon"] <- 6
 tss.source[tss.source == "zeta"]    <- 7
 tss.source <- as.numeric(tss.source)
 
+## Implementar en un futuro el soporte para plasmidos
+tss.df %>% filter(Source == 1)
 
 ## Inicializa una lista que guarda en cada elemento una secuencia de 150 pb
 seqs.list <- list()
@@ -53,11 +95,7 @@ for(i in 1:nrow(tss.df))
   print(i)
   # Averigua en que cromosoma/plasmido esta el tss actual
   current.source <- genome[[tss.source[i]]][[1]]
-  # Implementar en un futuro el soporte a los plasmidos
-  if(current.source != 1)
-  {
-    next
-  }
+
   ## Extrae la coordenada del tss
   current.coordinate <- tss.coordinates[i]
   
@@ -82,7 +120,6 @@ for(i in 1:nrow(tss.df))
   ## de la lista de secuencias
   seqs.list[i]  <- paste(current.source[window], collapse = "")
 }
-
 
 # Exporta todo a un archivo fasta
 write.fasta(file.out = "Anabaena_150_promotor.fasta", sequences = seqs.list, names = seqs.id, nbchar = 50, as.string = T)
