@@ -7,6 +7,32 @@ library("seqinr")
 library("seqLogo")
 source_gist(4676064)
 
+consensus.displayer <- function(seqs, mismatch.threshold)
+{
+  library("dplyr")
+  ## Select only those seqs that have less mismatches than stated in the treshold
+  ## if threshold is 2, only 0 and 1 mismatches are selected
+  seqs <- seqs %>% dplyr::filter(n.mismatch < mismatch.threshold) #seqs[n.mismatch < mismatch.threshold,]
+  seqs <- dplyr::select(seqs, -n.mismatch)
+  ## Initialize a vector that will store the consensus score of every position i from
+  ## the sequence in the i position of the vector
+  conservados <- numeric(length = 10)
+  
+  # for every position in the sequence
+  for(i in 1:10)
+  {
+    #compute how many rows have the same letter as the one stated in the first row
+    conserva <- sum(seqs[1,i] == seqs[-1,i])
+    #add this sum to the corresponding position on conservados
+    conservados[i] <- conserva
+  }
+  #normalize the vector so that scores range between 0 and 1
+  conservados <- conservados / nrow(seqs)
+  names(conservados) <- seqs[1,] %>% as.list() %>% unlist() %>% as.character
+  return(conservados)
+} 
+
+
 #Function that produces a matrix that seqlogo understands
 alignment.analyzer <- function(alignment.df)
 {
@@ -33,7 +59,7 @@ alignment.analyzer <- function(alignment.df)
 
 
 
-select.by.mismatches <- function(df, mypattern, mysubject, mismatch, colnames)
+select.by.mismatches <- function(df, mypattern, mysubject, mismatch)
 {
   vmatchPattern.result <- vmatchPattern(pattern  = mypattern,
                                         #subject is an object that stores the sequences returned by FIMO
@@ -41,9 +67,17 @@ select.by.mismatches <- function(df, mypattern, mysubject, mismatch, colnames)
                                         max.mismatch = mismatch, min.mismatch = mismatch)
   
   df.rows <- vmatchPattern.result %>% elementNROWS() %>% as.logical()
+  if(sum(df.rows) == 0)
+  {
+    print(paste("No sequences with", mismatch, "mismatches", sep = " "))
+    return(F)
+  }
+  else
+  {
   mydf <- df[df.rows, ]
   mydf$n.mismatch <- mismatch
   return(mydf)
+  }
 }
 
 break.by.underscore.fields <- function(big.set, underscore.fields.column, seqId.fields)
@@ -128,27 +162,32 @@ make.numeric.those.numeric <- function(df)
 ## filas que las que tiene la propia df
 
 ## This function organizes the fimo output by number of mismatches, and adds a significant expression tag based on threshold value
-fimo.output.integrator <- function(fimo.file, seqId.fields, DNA.pattern, mismatch, expression, threshold = 3)
+fimo.output.integrator <- function(fimo.df, seqId.fields, DNA.pattern, mismatch, expression, threshold = 3, pattern.id)
 {
-  #Lee la tabla y guardala en la variable fimo
-  fimo <- read.table(fimo.file, header = T, sep = "\t", quote = "")
-  fimo <- fimo %>% dplyr::select(-pattern.name, -strand)
-  DNA.subject <- fimo.subject.sequences(fimo)
+  fimo.df$pattern.id <- pattern.id
+  fimo.df <- fimo.df %>% dplyr::select(-strand)
+  DNA.subject <- fimo.subject.sequences(fimo.df)
   
   #La columna de ids contiene varios datos en la misma cadena. Separa esos datos por _ y
   ## Genera una data.frame en la que cada fila representa un TSS y hay 4 columnas:
   ## source, coordenada, gen y tipo de tss, y ponles el nombre adecuado
-  fimo.tss <- break.by.underscore.fields(fimo, "sequence.name", seqId.fields)
+  fimo.tss <- break.by.underscore.fields(fimo.df, "sequence.name", seqId.fields)
 
   # Añade esta data.frame a fimo (la principal) 
-  fimo <- cbind(fimo.tss, fimo %>% dplyr::select(-sequence.name))
+  fimo.df <- cbind(fimo.tss, fimo.df %>% dplyr::select(-sequence.name))
   rm(fimo.tss)
-  fimo <- make.numeric.those.numeric(fimo)
-  fimo <- fimo %>% filter(Source == "chr")
+  fimo.df <- make.numeric.those.numeric(fimo.df)
+  fimo.df$Annotation <- as.character(fimo.df$Annotation)
+  fimo.df <- fimo.df %>% filter(Source == "chr")
   ## Genera una data.frame analoga con los TSS que tienen un palindromo con el numero de mismatches predefinido
   ## en su entorno
-  fimo.subset <- select.by.mismatches(fimo, DNA.pattern, DNA.subject, mismatch, seqId.fields)
-  
+  fimo.subset <- select.by.mismatches(fimo.df, DNA.pattern, DNA.subject, mismatch)
+  if(fimo.subset %>% class != "data.frame")
+  {
+    return(F)
+  }
+  else
+  {
   ## elimina aquellas filas en las que el nombre del gen y la secuencia detectada sean exactamente las mismas
   ## esto ocurre cuando varios TSS se encuentran asociados al mismo gen (desde el sd01.xslx) y ambos resultan
   ## estar en el entorno de un palindromo. Les sale que es el mismo
@@ -160,16 +199,15 @@ fimo.output.integrator <- function(fimo.file, seqId.fields, DNA.pattern, mismatc
   fimo.subset <- count.reps(df = fimo.subset, "pasted.seq.ann") 
   fimo.subset <- fimo.subset %>% dplyr::select(-pasted.seq.ann)
   
-  
-  
-  
   #haz un subset de expression.df que se quede con tss que no estan en los plasmidos (mejorar codigo para soportar plasmidos)
   #y haz un subset que solo muestre informacion sobre los tss que hemos seleccionado de fimo
   #con eso, filtramos la informacion transcriptomica de los tss que ha detectado fimo
   expression.df <- expression.df %>% filter(Source == "chr")
   #expression.df <- subset(expression.df, expression.df$TSS %in% fimo.subset$TSS)
 
-
+  fimo.subset$TSS <- as.numeric(fimo.subset$TSS)
+  fimo.subset$start <- as.numeric(fimo.subset$start)
+  fimo.subset$stop <- as.numeric(fimo.subset$stop)
   df <- dplyr::inner_join(expression.df, fimo.subset, by = c("TSS", "Annotation", "TSS.class","Source"))
   ##Correct the sequences found in the - strand to show their complementary (defaults to the + strand)
   df <- complementary.reversal(df, sequence.var = "matched.sequence", strand.var = "Strand")
@@ -178,6 +216,8 @@ fimo.output.integrator <- function(fimo.file, seqId.fields, DNA.pattern, mismatc
   df[df[["Strand"]] == "rev", "stop"]  <- df[df[["Strand"]] == "rev", "stop"]  + 10
   
   return(df)
+  }
+
 }
 
 

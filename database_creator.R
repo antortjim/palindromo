@@ -1,6 +1,6 @@
 ## Fija el espacio de trabajo
 setwd("~/MEGA/CuartoCurso/TFG/Bioinformatica")
-
+options(stringsAsFactors = FALSE)
 ##Carga de paquetes
 library("AnnotationForge")
 library("Biostrings")
@@ -23,7 +23,6 @@ asCharacter <- function(my.characters)
 
 paste.features.by.underscore <- function(df, features, fasta.restriction = T)
 {
-  options(stringsAsFactors = FALSE)
   features <- asCharacter(features)
   mydf <- data.frame(mock = rep(0, nrow(df)), stringsAsFactors = F)
   for(i in 1:length(features))
@@ -62,39 +61,42 @@ genome <- lapply(genome, function(x) strsplit(as.character(x), split = ""))
 
 ## Introduce las coordenadas de los TSS
 tss.df <- read.xlsx("sd01.xlsx", sheet = 1, startRow = 2, colNames = TRUE)
+## Implementar en un futuro el soporte para plasmidos
+tss.df <- tss.df %>% filter(Source == "chr")
+
 
 ## Construye el identificador de todas las secuencias (seqs.id)
 seqs.id <- paste.features.by.underscore(tss.df,  "Source, TSS, Annotation, TSS.class")
-
-#tss.df[1390,] %>% dplyr::select(Source, TSS, Annotation, TSS.class)
 
 ## Extrae las coordenadas dentro de la mega data.frame con todos los datos del PNAS
 ## para facilitar su acceso en cada iteracion del bucle for
 tss.coordinates <- tss.df$TSS
 
 ## Codifica los cromosomas bacterianos con un numero
-tss.source <- tss.df$Source
-tss.source[tss.source == "chr"]     <- 1
-tss.source[tss.source == "alpha"]   <- 2
-tss.source[tss.source == "beta"]    <- 3
-tss.source[tss.source == "gamma"]   <- 4
-tss.source[tss.source == "delta"]   <- 5
-tss.source[tss.source == "epsilon"] <- 6
-tss.source[tss.source == "zeta"]    <- 7
-tss.source <- as.numeric(tss.source)
+# tss.source <- tss.df$Source
+# tss.source[tss.source == "chr"]     <- 1
+# tss.source[tss.source == "alpha"]   <- 2
+# tss.source[tss.source == "beta"]    <- 3
+# tss.source[tss.source == "gamma"]   <- 4
+# tss.source[tss.source == "delta"]   <- 5
+# tss.source[tss.source == "epsilon"] <- 6
+# tss.source[tss.source == "zeta"]    <- 7
+# tss.source <- as.numeric(tss.source)
 
-## Implementar en un futuro el soporte para plasmidos
-tss.df %>% filter(Source == 1)
+
 
 ## Inicializa una lista que guarda en cada elemento una secuencia de 150 pb
 seqs.list <- list()
 
+my.positions <- rep(F, length(bsgenome[[1]]))
+
+genome <- genome[[1]]
 ## Para cada tss
 for(i in 1:nrow(tss.df))
 {
   print(i)
   # Averigua en que cromosoma/plasmido esta el tss actual
-  current.source <- genome[[tss.source[i]]][[1]]
+  #current.source <- genome[[tss.source[i]]][[1]]
 
   ## Extrae la coordenada del tss
   current.coordinate <- tss.coordinates[i]
@@ -116,10 +118,18 @@ for(i in 1:nrow(tss.df))
    window <- c(window.start:length(current.source), 1:window.stop)
   }
   
+  my.positions[window] <- T
+
+  
   ## Accede a la secuencia, conviertela en una cadena, y guardala en la posicion correspondiente
   ## de la lista de secuencias
-  seqs.list[i]  <- paste(current.source[window], collapse = "")
+  seqs.list[i]  <- paste(genome[window], collapse = "")
 }
+
+sum(my.positions)
+length(genome)
+
+
 
 # Exporta todo a un archivo fasta
 write.fasta(file.out = "Anabaena_150_promotor.fasta", sequences = seqs.list, names = seqs.id, nbchar = 50, as.string = T)
