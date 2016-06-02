@@ -66,6 +66,7 @@ select.by.mismatches <- function(df, mypattern, mysubject, mismatch)
                                         subject = mysubject,
                                         max.mismatch = mismatch, min.mismatch = mismatch)
   
+  
   df.rows <- vmatchPattern.result %>% elementNROWS() %>% as.logical()
   if(sum(df.rows) == 0)
   {
@@ -75,15 +76,22 @@ select.by.mismatches <- function(df, mypattern, mysubject, mismatch)
   else
   {
   mydf <- df[df.rows, ]
+
   mydf$n.mismatch <- mismatch
   return(mydf)
   }
 }
 
-break.by.underscore.fields <- function(big.set, underscore.fields.column, seqId.fields)
+break.by.break.fields <- function(big.set, underscore.fields.column, seqId.fields, numeric.fields, break.char)
 {
-  small.set <- big.set[[underscore.fields.column]] %>% as.character() %>% strsplit(split = "_") %>% as.data.frame.list()
+  ## Break strings by break.char and generate a new dataframe where each row is the result of breaking each string
+  small.set <- data.frame(do.call('rbind', strsplit(as.character(big.set[[underscore.fields.column]]), break.char, fixed=TRUE)))
+  
+
+  ## Add the colnames given by seqId.fields
   colnames(small.set) <- seqId.fields
+  ## Set TSS as numeric, instead of as.character (cant be helped by command above)
+  small.set[,numeric.fields]<- as.numeric(small.set[,numeric.fields])
   return(small.set)
 }
 
@@ -112,10 +120,10 @@ count.reps <- function(df, feature.containing.repeats)
 
 
 
-complementary.reversal <- function(data, sequence.var = "matched.sequence", strand.var = "Strand")
+complementary.reversal <- function(df, sequence.var = "matched.sequence", strand.var = "Strand")
 {
-  sequences <- data[[sequence.var]]
-  strand <- data[[strand.var]]
+  sequences <- df[[sequence.var]]
+  strand <- df[[strand.var]]
   names(sequences) <- strand
   for(i in 1:length(sequences))
   {
@@ -124,8 +132,8 @@ complementary.reversal <- function(data, sequence.var = "matched.sequence", stra
       sequences[i] <- sequences[i] %>% s2c %>% rev %>% comp %>% toupper %>% c2s
     }
   }
-  data[[sequence.var]] <- sequences
-  return(data)
+  df[[sequence.var]] <- sequences
+  return(df)
 }
 
 
@@ -162,7 +170,7 @@ make.numeric.those.numeric <- function(df)
 ## filas que las que tiene la propia df
 
 ## This function organizes the fimo output by number of mismatches, and adds a significant expression tag based on threshold value
-fimo.output.integrator <- function(fimo.df, seqId.fields, DNA.pattern, mismatch, expression, threshold = 3, pattern.id)
+fimo.output.integrator <- function(fimo.df, seqId.fields, numeric.fields, DNA.pattern, mismatch, transcriptomics = NULL, threshold = 3, pattern.id, break.char, join.fields)
 {
   fimo.df$pattern.id <- pattern.id
   fimo.df <- fimo.df %>% dplyr::select(-strand)
@@ -171,17 +179,22 @@ fimo.output.integrator <- function(fimo.df, seqId.fields, DNA.pattern, mismatch,
   #La columna de ids contiene varios datos en la misma cadena. Separa esos datos por _ y
   ## Genera una data.frame en la que cada fila representa un TSS y hay 4 columnas:
   ## source, coordenada, gen y tipo de tss, y ponles el nombre adecuado
-  fimo.tss <- break.by.underscore.fields(fimo.df, "sequence.name", seqId.fields)
+  fimo.tss <- break.by.break.fields(fimo.df, "sequence.name", seqId.fields, numeric.fields, break.char)
 
   # Añade esta data.frame a fimo (la principal) 
   fimo.df <- cbind(fimo.tss, fimo.df %>% dplyr::select(-sequence.name))
   rm(fimo.tss)
-  fimo.df <- make.numeric.those.numeric(fimo.df)
+ #fimo.df <- make.numeric.those.numeric(fimo.df)
   fimo.df$Annotation <- as.character(fimo.df$Annotation)
-  fimo.df <- fimo.df %>% filter(Source == "chr")
+  if(sum(colnames(fimo.df) %in% "Source"))
+    {
+    fimo.df <- fimo.df %>% filter(Source == "chr")
+   }
   ## Genera una data.frame analoga con los TSS que tienen un palindromo con el numero de mismatches predefinido
   ## en su entorno
   fimo.subset <- select.by.mismatches(fimo.df, DNA.pattern, DNA.subject, mismatch)
+  #Return false if fimo.subset is not a data.frame, which happens when there are no instances
+  #with the supplied number of mismatches
   if(fimo.subset %>% class != "data.frame")
   {
     return(F)
@@ -199,16 +212,26 @@ fimo.output.integrator <- function(fimo.df, seqId.fields, DNA.pattern, mismatch,
   fimo.subset <- count.reps(df = fimo.subset, "pasted.seq.ann") 
   fimo.subset <- fimo.subset %>% dplyr::select(-pasted.seq.ann)
   
+
+  #expression.df <- subset(expression.df, expression.df$TSS %in% fimo.subset$TSS)
+  # fimo.subset$TSS <- as.numeric(fimo.subset$TSS)
+  # fimo.subset$start <- as.numeric(fimo.subset$start)
+  # fimo.subset$stop <- as.numeric(fimo.subset$stop)
+  if(class(transcriptomics)  == "data.frame")
+  { 
   #haz un subset de expression.df que se quede con tss que no estan en los plasmidos (mejorar codigo para soportar plasmidos)
   #y haz un subset que solo muestre informacion sobre los tss que hemos seleccionado de fimo
   #con eso, filtramos la informacion transcriptomica de los tss que ha detectado fimo
-  expression.df <- expression.df %>% filter(Source == "chr")
-  #expression.df <- subset(expression.df, expression.df$TSS %in% fimo.subset$TSS)
-
-  fimo.subset$TSS <- as.numeric(fimo.subset$TSS)
-  fimo.subset$start <- as.numeric(fimo.subset$start)
-  fimo.subset$stop <- as.numeric(fimo.subset$stop)
-  df <- dplyr::inner_join(expression.df, fimo.subset, by = c("TSS", "Annotation", "TSS.class","Source"))
+  transcriptomics <- transcriptomics %>% filter(Source == "chr")
+  df <- dplyr::inner_join(transcriptomics, fimo.subset, by = join.fields)
+  }
+  else
+  {
+  df <- fimo.subset
+  }
+  
+ 
+  
   ##Correct the sequences found in the - strand to show their complementary (defaults to the + strand)
   df <- complementary.reversal(df, sequence.var = "matched.sequence", strand.var = "Strand")
   ##Correct the relative position of these sequences with respect to the TSS
@@ -237,3 +260,45 @@ addDistanceAsCharacter <- function(df, var = "start", distance = upstream.distan
   df[[formatted.var]] <- paste(symbol, new.var.abs)
   return(df)
 }
+
+transcriptomics.data <- expression.df
+read.fimo.data <- function(fimo.file, seqId.fields, numeric.fields, num.ran, break.char, transcriptomics = transcriptomics.data, join.fields = join.fields)
+{
+  ## Initialize the data.frame that will store extracted data
+  data <- data.frame(stringsAsFactors = FALSE)
+  ## For every possible mismatch, extract data and add it to that of all other mismatches
+  ## fimo.output.integrator works row-based. fimo.output.integrator must be executed once per row. Each iteration adds a new row corresponding
+  ## to a differnet hit in fimo.txt
+  cmd <- paste("sed -i.backup 's/^#//' ", fimo.file, sep ="")
+  system(cmd)
+  #Lee la tabla y guardala en la variable fimo
+  fimo <- read.table(fimo.file, header = T, sep = "\t", quote = "")
+  my.motifs.names <- c("palindromo", paste("random_", 1:num.ran, sep = ""))
+  
+  for(i in 1:length(my.motifs.names))
+  {
+    print(i)
+    pattern.id <- i -1
+    print(my.motifs.names[i])
+    mysubset <- filter(fimo, pattern.name == my.motifs.names[i])
+    DNA.pattern <- my.motifs.seqs[i] %>% DNAString()
+    for(mismatch in min.mismatch:max.mismatch)
+    {
+      print(mismatch)
+      current.mismatch <- fimo.output.integrator(fimo.df = mysubset, seqId.fields = seqId.fields, numeric.fields = numeric.fields,
+                                                 DNA.pattern, mismatch, transcriptomics = transcriptomics, threshold,
+                                                 pattern.id = pattern.id, break.char = break.char, join.fields)
+      if(current.mismatch %>% class == "data.frame")
+      {
+        data <- rbind(data, current.mismatch)
+      }
+      rm(current.mismatch)
+    }
+  }
+  data <- addDistanceAsCharacter(data)
+  sequences <- data$matched.sequence %>% as.list() %>% lapply(s2c) %>% as.data.frame.list
+  data <- cbind(data, sequences); rm(sequences)
+  return(data)
+}
+
+

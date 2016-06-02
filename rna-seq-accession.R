@@ -4,6 +4,7 @@ setwd("~/MEGA/CuartoCurso/TFG/Bioinformatica")
 ##Carga de paquetes necesarios
 #Acceso a tabla excel
 library("openxlsx")
+library("dplyr")
 
 threshold <- commandArgs()[1] %>% as.numeric()
 ## Accede a los datos
